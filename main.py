@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
@@ -399,7 +397,3 @@ async def buscar_treino_por_data(usuario: str, data_busca: str):
         "grupos_musculares": list(grupos_musculares),
         "exercicios": exercicios_consolidados
     }
-'''
-path = Path('/mnt/data/main_api_ajustada.py')
-path.write_text(code, encoding='utf-8')
-print(path)
