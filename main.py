@@ -23,9 +23,49 @@ colecao_usuarios = banco.usuarios
 # ==========================================
 # HELPERS
 # ==========================================
-def formatar_data(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%d")
+def extrair_data_treino(doc: dict) -> Optional[datetime]:
+    valor = doc.get("data_treino")
 
+    if isinstance(valor, datetime):
+        return valor
+
+    if isinstance(valor, str):
+        try:
+            return datetime.fromisoformat(valor.replace("Z", "+00:00"))
+        except Exception:
+            try:
+                return datetime.strptime(valor, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except Exception:
+                pass
+
+    valor_antigo = doc.get("data")
+
+    if isinstance(valor_antigo, datetime):
+        return valor_antigo
+
+    if isinstance(valor_antigo, str):
+        try:
+            return datetime.fromisoformat(valor_antigo.replace("Z", "+00:00"))
+        except Exception:
+            try:
+                return datetime.strptime(valor_antigo, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except Exception:
+                pass
+
+    return None
+
+
+def formatar_data(valor) -> str:
+    if isinstance(valor, datetime):
+        return valor.strftime("%Y-%m-%d")
+
+    if isinstance(valor, str):
+        try:
+            return datetime.fromisoformat(valor.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+        except Exception:
+            return valor[:10]
+
+    return ""
 
 def calcular_volume_total(series: list[dict]) -> float:
     return round(sum((s["reps"] * s["carga_kg"]) for s in series), 2)
@@ -268,94 +308,115 @@ async def buscar_ultima_carga(usuario: str, nome_exercicio: str):
         "exercicios.nome": {"$regex": f"^{nome_exercicio}$", "$options": "i"}
     }
 
-    ultimo_treino = await colecao_treinos.find_one(
-        filtro,
-        sort=[("data_treino", -1)]
-    )
+    cursor = colecao_treinos.find(filtro)
+    treinos = await cursor.to_list(length=100)
 
-    if not ultimo_treino:
+    if not treinos:
         raise HTTPException(status_code=404, detail="Exercício não encontrado.")
 
-    for ex in ultimo_treino["exercicios"]:
-        if ex["nome"].lower() == nome_exercicio.lower():
-            return {
-                "exercicio": ex["nome"],
-                "ultimo_treino": formatar_data(ultimo_treino["data_treino"]),
-                "series": ex["series"]
-            }
+    treinos_ordenados = sorted(
+        treinos,
+        key=lambda t: extrair_data_treino(t) or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True
+    )
+
+    for treino in treinos_ordenados:
+        for ex in treino.get("exercicios", []):
+            if ex.get("nome", "").lower() == nome_exercicio.lower():
+                data_ref = extrair_data_treino(treino)
+                return {
+                    "exercicio": ex["nome"],
+                    "ultimo_treino": formatar_data(data_ref),
+                    "series": ex.get("series", [])
+                }
 
     raise HTTPException(status_code=404, detail="Exercício não encontrado.")
 
 
 @app.get("/treino/resumo/{usuario}/{nome_exercicio}")
 async def buscar_resumo_exercicio(usuario: str, nome_exercicio: str):
-    filtro = {
-        "usuario": usuario,
-        "exercicios.nome": {"$regex": f"^{nome_exercicio}$", "$options": "i"}
-    }
-
-    cursor = colecao_treinos.find(filtro).sort("data_treino", -1)
-    treinos = await cursor.to_list(length=50)
-
-    if not treinos:
-        raise HTTPException(status_code=404, detail="Nenhum histórico encontrado para este exercício.")
-
-    sessoes = []
-
-    for treino in treinos:
-        for ex in treino["exercicios"]:
-            if ex["nome"].lower() == nome_exercicio.lower():
-                series = ex["series"]
-                melhor_serie_sessao = buscar_melhor_serie(series)
-                sessoes.append({
-                    "data": formatar_data(treino["data_treino"]),
-                    "series": series,
-                    "volume_total": calcular_volume_total(series),
-                    "total_series": len(series),
-                    "melhor_serie": melhor_serie_sessao
-                })
-
-    if not sessoes:
-        raise HTTPException(status_code=404, detail="Nenhum histórico encontrado para este exercício.")
-
-    ultima_sessao = sessoes[0]
-
-    todas_series = []
-    for sessao in sessoes:
-        todas_series.extend(sessao["series"])
-
-    melhor_serie_geral = buscar_melhor_serie(todas_series)
-    maior_carga = max((s["carga_kg"] for s in todas_series), default=0)
-
-    ultimas_sessoes = [
-        {
-            "data": s["data"],
-            "volume_total": s["volume_total"],
-            "total_series": s["total_series"]
+    try:
+        filtro = {
+            "usuario": usuario,
+            "exercicios.nome": {"$regex": f"^{nome_exercicio}$", "$options": "i"}
         }
-        for s in sessoes[:3]
-    ]
 
-    return {
-        "exercicio": nome_exercicio,
-        "ultima_sessao": {
-            "data": ultima_sessao["data"],
-            "series": ultima_sessao["series"],
-            "volume_total": ultima_sessao["volume_total"],
-            "total_series": ultima_sessao["total_series"]
-        },
-        "melhor_serie": {
-            "reps": melhor_serie_geral["reps"],
-            "carga_kg": melhor_serie_geral["carga_kg"],
-            "estimativa_1rm": estimar_1rm(
-                melhor_serie_geral["reps"],
-                melhor_serie_geral["carga_kg"]
-            )
-        } if melhor_serie_geral else None,
-        "maior_carga": maior_carga,
-        "ultimas_sessoes": ultimas_sessoes
-    }
+        cursor = colecao_treinos.find(filtro)
+        treinos = await cursor.to_list(length=100)
 
+        if not treinos:
+            raise HTTPException(status_code=404, detail="Nenhum histórico encontrado para este exercício.")
+
+        treinos_ordenados = sorted(
+            treinos,
+            key=lambda t: extrair_data_treino(t) or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True
+        )
+
+        sessoes = []
+
+        for treino in treinos_ordenados:
+            data_ref = extrair_data_treino(treino)
+
+            for ex in treino.get("exercicios", []):
+                if ex.get("nome", "").lower() == nome_exercicio.lower():
+                    series = ex.get("series", [])
+                    if not series:
+                        continue
+
+                    sessoes.append({
+                        "data": formatar_data(data_ref),
+                        "series": series,
+                        "volume_total": calcular_volume_total(series),
+                        "total_series": len(series),
+                        "melhor_serie": buscar_melhor_serie(series)
+                    })
+
+        if not sessoes:
+            raise HTTPException(status_code=404, detail="Nenhum histórico encontrado para este exercício.")
+
+        ultima_sessao = sessoes[0]
+
+        todas_series = []
+        for sessao in sessoes:
+            todas_series.extend(sessao["series"])
+
+        melhor_serie_geral = buscar_melhor_serie(todas_series)
+        maior_carga = max((s["carga_kg"] for s in todas_series), default=0)
+
+        ultimas_sessoes = [
+            {
+                "data": s["data"],
+                "volume_total": s["volume_total"],
+                "total_series": s["total_series"]
+            }
+            for s in sessoes[:3]
+        ]
+
+        return {
+            "exercicio": nome_exercicio,
+            "ultima_sessao": {
+                "data": ultima_sessao["data"],
+                "series": ultima_sessao["series"],
+                "volume_total": ultima_sessao["volume_total"],
+                "total_series": ultima_sessao["total_series"]
+            },
+            "melhor_serie": {
+                "reps": melhor_serie_geral["reps"],
+                "carga_kg": melhor_serie_geral["carga_kg"],
+                "estimativa_1rm": estimar_1rm(
+                    melhor_serie_geral["reps"],
+                    melhor_serie_geral["carga_kg"]
+                )
+            } if melhor_serie_geral else None,
+            "maior_carga": maior_carga,
+            "ultimas_sessoes": ultimas_sessoes
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("ERRO /treino/resumo:", repr(e))
+        raise HTTPException(status_code=500, detail="Erro ao montar resumo do exercício.")
 
 @app.get("/treino/datas-treinadas/{usuario}")
 async def buscar_datas_treinadas(usuario: str):
