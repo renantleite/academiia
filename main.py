@@ -130,7 +130,7 @@ class Treino(BaseModel):
 # ==========================================
 # STARTUP: ÍNDICES
 # ==========================================
- @app.on_event("startup")
+@app.on_event("startup")
 async def criar_indices():
     await colecao_usuarios.create_index("nome", unique=True)
     await colecao_treinos.create_index([("usuario", 1), ("data_treino", -1)])
