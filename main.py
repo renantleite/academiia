@@ -130,12 +130,12 @@ class Treino(BaseModel):
 # ==========================================
 # STARTUP: ÍNDICES
 # ==========================================
-#'' @app.on_event("startup")#
-#async def criar_indices():
-    #await colecao_usuarios.create_index("nome", unique=True)#
-    #await colecao_treinos.create_index([("usuario", 1), ("data_treino", -1)])#
-    ##await colecao_treinos.create_index([("usuario", 1), ("grupo_muscular", 1)])#
-    #await colecao_treinos.create_index([("usuario", 1), ("exercicios.nome", 1)])#
+ @app.on_event("startup")
+async def criar_indices():
+    await colecao_usuarios.create_index("nome", unique=True)
+    await colecao_treinos.create_index([("usuario", 1), ("data_treino", -1)])
+    await colecao_treinos.create_index([("usuario", 1), ("grupo_muscular", 1)])
+    await colecao_treinos.create_index([("usuario", 1), ("exercicios.nome", 1)])
 
 
 # ==========================================
