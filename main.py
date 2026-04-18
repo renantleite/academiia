@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
@@ -139,22 +141,46 @@ async def raiz():
 # ==========================================
 @app.post("/usuarios/criar")
 async def criar_usuario(usuario: Usuario):
-    existe = await colecao_usuarios.find_one({"nome": usuario.nome})
-    if existe:
-        raise HTTPException(status_code=400, detail="Este nome já está em uso.")
+    try:
+        nome_limpo = usuario.nome.strip()
 
-    await colecao_usuarios.insert_one(usuario.model_dump())
-    return {
-        "status": "sucesso",
-        "mensagem": "Perfil criado com sucesso."
-    }
+        existe = await colecao_usuarios.find_one({"nome": nome_limpo})
+        if existe:
+            raise HTTPException(status_code=400, detail="Este nome já está em uso.")
+
+        await colecao_usuarios.insert_one({
+            "nome": nome_limpo,
+            "pin": usuario.pin
+        })
+
+        return {
+            "status": "sucesso",
+            "mensagem": "Perfil criado com sucesso."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("ERRO /usuarios/criar:", repr(e))
+        raise HTTPException(status_code=500, detail="Erro ao criar usuário.")
 
 
 @app.get("/usuarios/listar")
 async def listar_usuarios():
-    cursor = colecao_usuarios.find({}, {"nome": 1, "_id": 0}).sort("nome", 1)
-    usuarios = await cursor.to_list(length=200)
-    return [u["nome"] for u in usuarios]
+    try:
+        cursor = colecao_usuarios.find({}, {"nome": 1, "_id": 0})
+        usuarios = await cursor.to_list(length=200)
+
+        nomes = []
+        for u in usuarios:
+            if isinstance(u, dict):
+                nome = u.get("nome")
+                if isinstance(nome, str) and nome.strip():
+                    nomes.append(nome.strip())
+
+        return sorted(nomes, key=str.lower)
+    except Exception as e:
+        print("ERRO /usuarios/listar:", repr(e))
+        raise HTTPException(status_code=500, detail="Erro ao listar usuários.")
 
 
 @app.post("/usuarios/login")
@@ -373,3 +399,7 @@ async def buscar_treino_por_data(usuario: str, data_busca: str):
         "grupos_musculares": list(grupos_musculares),
         "exercicios": exercicios_consolidados
     }
+'''
+path = Path('/mnt/data/main_api_ajustada.py')
+path.write_text(code, encoding='utf-8')
+print(path)
